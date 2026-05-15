@@ -5,8 +5,8 @@ HubSpot → Brevo sync
 Syncs contacts from active HubSpot deals to Brevo
 with automatic language tagging (CZ / EN).
 
-Spuštění:    python sync.py
-Cron (denně v 7:00):  0 7 * * * cd /path/to/script && python sync.py
+Run:    python sync.py
+Cron (daily at 7:00):  0 7 * * * cd /path/to/script && python sync.py
 """
 
 import os
@@ -19,21 +19,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ──────────────────────────────────────────────────────────────────────
-# KONFIGURACE — upravte podle potřeby
+# CONFIGURATION — adjust to your needs
 # ──────────────────────────────────────────────────────────────────────
 
 HUBSPOT_API_KEY = os.getenv("HUBSPOT_API_KEY")
 BREVO_API_KEY   = os.getenv("BREVO_API_KEY")
 
-# ID listů v Brevo (zjistíš v Brevo → Contacts → Lists → klikni na list → ID v URL)
+# Brevo list IDs (find in Brevo → Contacts → Lists → click list → ID in URL)
 BREVO_LIST_CZ = int(os.getenv("BREVO_LIST_CZ", "0"))
 BREVO_LIST_EN = int(os.getenv("BREVO_LIST_EN", "0"))
 
-# E-mailové domény → CZ newsletter
+# Email domains → CZ newsletter
 CZ_DOMAINS = {".cz", ".sk"}
 
-# HubSpot deal stages, které se PŘESKOČÍ (interní názvy stages z HubSpotu)
-# Zobraz si je přes: GET /crm/v3/pipelines/deals
+# HubSpot deal stages to SKIP (internal stage names from HubSpot)
+# View them via: GET /crm/v3/pipelines/deals
 EXCLUDE_STAGES = {"closedlost"}
 
 HUBSPOT_BASE = "https://api.hubapi.com"
@@ -51,7 +51,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────
-# POMOCNÉ FUNKCE
+# HELPERS
 # ──────────────────────────────────────────────────────────────────────
 
 def hs_headers() -> dict:
@@ -70,6 +70,12 @@ def brevo_headers() -> dict:
 
 def detect_language(email: str, country: str = "", hs_language: str = "") -> str:
     """
+    Determine contact language (CZ or EN) by priority:
+      1. hs_language field in HubSpot (if set manually)
+      2. country field in HubSpot
+      3. Email domain TLD (.cz / .sk → CZ)
+      4. Default: EN
+    """
     Určí jazyk kontaktu (CZ nebo EN) podle priority:
       1. Pole 'hs_language' v HubSpotu (pokud ho nastavíš manuálně)
       2. Pole 'country' v HubSpotu
@@ -79,7 +85,7 @@ def detect_language(email: str, country: str = "", hs_language: str = "") -> str
     Jakmile se rozhodneš pro konkrétní HubSpot property,
     stačí upravit jen tuto funkci — zbytek skriptu zůstane stejný.
     """
-    # 1. Explicitní jazykové pole v HubSpotu
+    # 1. Explicit language field in HubSpot
     if hs_language:
         lang = hs_language.upper()
         if lang in {"CS", "CZ", "SK"}:
@@ -87,7 +93,7 @@ def detect_language(email: str, country: str = "", hs_language: str = "") -> str
         if lang:
             return "EN"
 
-    # 2. Země kontaktu
+    # 2. Contact country
     if country:
         c = country.strip().upper()
         if c in {"CZ", "CS", "CZECH", "CZECHIA", "CZECH REPUBLIC", "SK", "SLOVAKIA"}:
@@ -95,21 +101,21 @@ def detect_language(email: str, country: str = "", hs_language: str = "") -> str
         if c:
             return "EN"
 
-    # 3. Doménová koncovka e-mailu
+    # 3. Email domain TLD
     match = re.search(r"\.[a-z]{2,}$", email.lower())
     if match and match.group() in CZ_DOMAINS:
         return "CZ"
 
-    # 4. Výchozí
+    # 4. Default
     return "EN"
 
 
 # ──────────────────────────────────────────────────────────────────────
-# HUBSPOT — čtení dat
+# HUBSPOT — read data
 # ──────────────────────────────────────────────────────────────────────
 
 def get_all_pipeline_deal_ids() -> list[str]:
-    """Vrátí ID všech dealů v pipeline (kromě closedlost)."""
+    """Return IDs of all deals in pipeline (except closedlost)."""
     deal_ids = []
     after = None
 
@@ -142,12 +148,12 @@ def get_all_pipeline_deal_ids() -> list[str]:
 
         time.sleep(0.1)  # HubSpot rate limit: 100 req/10 s
 
-    log.info(f"HubSpot: nalezeno {len(deal_ids)} dealů v pipeline")
+    log.info(f"HubSpot: found {len(deal_ids)} deals in pipeline")
     return deal_ids
 
 
 def get_contact_ids_for_deal(deal_id: str) -> list[str]:
-    """Vrátí ID kontaktů přiřazených k danému dealu."""
+    """Return IDs of contacts associated with a given deal."""
     resp = requests.get(
         f"{HUBSPOT_BASE}/crm/v3/objects/deals/{deal_id}/associations/contacts",
         headers=hs_headers(),
@@ -160,7 +166,7 @@ def get_contact_ids_for_deal(deal_id: str) -> list[str]:
 
 
 def get_contact_details(contact_id: str) -> dict:
-    """Načte e-mail, jméno, zemi a jazykové pole kontaktu."""
+    """Load email, name, country, and language field of a contact."""
     resp = requests.get(
         f"{HUBSPOT_BASE}/crm/v3/objects/contacts/{contact_id}",
         headers=hs_headers(),
@@ -174,7 +180,7 @@ def get_contact_details(contact_id: str) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# BREVO — zápis dat
+# BREVO — write data
 # ──────────────────────────────────────────────────────────────────────
 
 def upsert_brevo_contact(
@@ -184,7 +190,10 @@ def upsert_brevo_contact(
     language: str,
 ) -> None:
     """
-    Vytvoří nebo aktualizuje kontakt v Brevo.
+    Create or update a contact in Brevo.
+    Adds it to the correct list (CZ or EN) and sets the LANGUAGE attribute.
+    updateEnabled=True ensures existing contacts are updated, not duplicated.
+    """    Vytvoří nebo aktualizuje kontakt v Brevo.
     Přidá ho do správného listu (CZ nebo EN) a nastaví atribut LANGUAGE.
     updateEnabled=True zajistí, že existující kontakt se jen aktualizuje,
     nikoli zduplikuje.
@@ -196,7 +205,7 @@ def upsert_brevo_contact(
         "attributes": {
             "FIRSTNAME": firstname,
             "LASTNAME":  lastname,
-            "LANGUAGE":  language,      # vlastní atribut — vytvoř ho v Brevo napřed
+            "LANGUAGE":  language,      # custom attribute — create it in Brevo first
         },
         "listIds": [list_id],
         "updateEnabled": True,
@@ -210,15 +219,15 @@ def upsert_brevo_contact(
     )
 
     if resp.status_code in (200, 201):
-        log.info(f"  ✓ NOVÝ     {email:45s} → [{language}]")
+        log.info(f"  ✓ CREATED  {email:45s} → [{language}]")
     elif resp.status_code == 204:
-        log.info(f"  ↻ UPDATE   {email:45s} → [{language}]")
+        log.info(f"  ↻ UPDATED  {email:45s} → [{language}]")
     else:
-        log.warning(f"  ✗ CHYBA    {email} | {resp.status_code} | {resp.text[:120]}")
+        log.warning(f"  ✗ ERROR    {email} | {resp.status_code} | {resp.text[:120]}")
 
 
 # ──────────────────────────────────────────────────────────────────────
-# HLAVNÍ LOGIKA
+# MAIN
 # ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -226,29 +235,29 @@ def main() -> None:
     log.info("  HubSpot → Brevo sync")
     log.info("══════════════════════════════════════════════")
 
-    # Kontrola konfigurace
+    # Check configuration
     errors = []
     if not HUBSPOT_API_KEY:
-        errors.append("Chybí HUBSPOT_API_KEY v .env")
+        errors.append("Missing HUBSPOT_API_KEY in .env")
     if not BREVO_API_KEY:
-        errors.append("Chybí BREVO_API_KEY v .env")
+        errors.append("Missing BREVO_API_KEY in .env")
     if BREVO_LIST_CZ == 0:
-        errors.append("Chybí BREVO_LIST_CZ v .env (ID listu v Brevo)")
+        errors.append("Missing BREVO_LIST_CZ in .env (Brevo list ID)")
     if BREVO_LIST_EN == 0:
-        errors.append("Chybí BREVO_LIST_EN v .env (ID listu v Brevo)")
+        errors.append("Missing BREVO_LIST_EN in .env (Brevo list ID)")
     if errors:
         for e in errors:
             log.error(f"  ✗ {e}")
         return
 
-    # Načtení dealů
+    # Load deals
     deal_ids = get_all_pipeline_deal_ids()
     if not deal_ids:
-        log.info("Žádné dealy k zpracování.")
+        log.info("No deals to process.")
         return
 
-    # Průchod kontakty
-    seen: set[str] = set()  # deduplikace přes více dealů
+    # Process contacts
+    seen: set[str] = set()  # deduplication across deals
     synced = skipped_no_email = skipped_dupe = 0
 
     for deal_id in deal_ids:
@@ -279,9 +288,9 @@ def main() -> None:
             time.sleep(0.15)  # Brevo: ~10 req/s limit
 
     log.info("──────────────────────────────────────────────")
-    log.info(f"  Synchronizováno: {synced}")
-    log.info(f"  Přeskočeno (duplicita): {skipped_dupe}")
-    log.info(f"  Přeskočeno (chybí e-mail): {skipped_no_email}")
+    log.info(f"  Synced: {synced}")
+    log.info(f"  Skipped (duplicate): {skipped_dupe}")
+    log.info(f"  Skipped (no email): {skipped_no_email}")
     log.info("══════════════════════════════════════════════")
 
 

@@ -52,9 +52,11 @@ python sync.py
 
 The script uses the HubSpot CRM API to fetch deals in active pipeline stages, then retrieves associated contacts. Each contact is analyzed for language preference based on available fields (locale, country, domain TLD). Contacts are then upserted to Brevo via the Brevo API with mapped attributes and added to the appropriate language list.
 
-## Author
-
 **Jakub Jamny** — AI automation specialist
 
 - [LinkedIn](https://www.linkedin.com/in/jakub-jamn%C3%BD-3a0410246)
 - [Website](https://jakubjamny.com)
+
+## License
+
+MIT
