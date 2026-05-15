@@ -75,16 +75,6 @@ def detect_language(email: str, country: str = "", hs_language: str = "") -> str
       2. country field in HubSpot
       3. Email domain TLD (.cz / .sk → CZ)
       4. Default: EN
-    """
-    Určí jazyk kontaktu (CZ nebo EN) podle priority:
-      1. Pole 'hs_language' v HubSpotu (pokud ho nastavíš manuálně)
-      2. Pole 'country' v HubSpotu
-      3. Doménová koncovka e-mailu (.cz / .sk → CZ)
-      4. Výchozí: EN
-
-    Jakmile se rozhodneš pro konkrétní HubSpot property,
-    stačí upravit jen tuto funkci — zbytek skriptu zůstane stejný.
-    """
     # 1. Explicit language field in HubSpot
     if hs_language:
         lang = hs_language.upper()
@@ -193,10 +183,6 @@ def upsert_brevo_contact(
     Create or update a contact in Brevo.
     Adds it to the correct list (CZ or EN) and sets the LANGUAGE attribute.
     updateEnabled=True ensures existing contacts are updated, not duplicated.
-    """    Vytvoří nebo aktualizuje kontakt v Brevo.
-    Přidá ho do správného listu (CZ nebo EN) a nastaví atribut LANGUAGE.
-    updateEnabled=True zajistí, že existující kontakt se jen aktualizuje,
-    nikoli zduplikuje.
     """
     list_id = BREVO_LIST_CZ if language == "CZ" else BREVO_LIST_EN
 
